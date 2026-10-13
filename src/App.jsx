@@ -8,6 +8,7 @@ import { loadBookFile, loadSample, SAMPLES } from './lib/loadBook.js'
 import { deleteBook, getPrefs, getProgress, listBooks, markSeeded, saveBook, setPrefs as savePrefs, setProgress, wasSeeded } from './lib/store.js'
 import { Engine, englishVoices, getVoices, hostIntro, hostOutro, previewDevice, supported } from './lib/speech.js'
 import { loadStudio, studioReady, synth } from './lib/studio.js'
+import { cloudReady, getCloudConfig, listCloudVoices, serverStatus, setCloudConfig, synthCloud } from './lib/cloud.js'
 
 const displayParas = (book, ch, mode) => (mode === 'condensed' ? condense(book.chapters[ch].paragraphs) : book.chapters[ch].paragraphs)
 
@@ -27,6 +28,7 @@ export default function App() {
   const [buffering, setBuffering] = useState(false)
   const [notice, setNotice] = useState('')
   const previewAudio = useRef(null)
+  const [cloud, setCloud] = useState(() => ({ cfg: getCloudConfig(), server: null, voices: [], status: 'idle', error: '' }))
 
   const book = useMemo(() => books.find((b) => b.id === bookId) || null, [books, bookId])
   const paras = useMemo(() => (book ? displayParas(book, ch, prefs.mode) : []), [book, ch, prefs.mode])
@@ -73,9 +75,10 @@ export default function App() {
     e.narrator = resolved.narrator
     e.host = resolved.host
     e.rate = p.rate
-    e.backend = p.engine
-    e.studioNarrator = p.studioVoice
-    e.studioHost = p.studioHost
+    e.backend = p.engine === 'device' ? 'device' : 'audio'
+    e.synthesize = p.engine === 'cloud' ? synthCloud : synth
+    e.audioNarrator = p.engine === 'cloud' ? p.cloudVoice : p.studioVoice
+    e.audioHost = p.engine === 'cloud' ? p.cloudHost : p.studioHost
     e.load({ intro: hostIntro(b, chapter, mins), paragraphs: list, outro: hostOutro(chapter, next), startPara })
     loadedKey.current = `${b.id}:${chIdx}:${p.mode}`
     e.start()
@@ -158,7 +161,7 @@ export default function App() {
     savePrefs(next)
     const e = engine.current
     if (patch.rate && e) e.setRate(patch.rate)
-    if (playing && (patch.mode || patch.engine || patch.voice !== undefined || patch.hostVoice !== undefined || patch.studioVoice || patch.studioHost)) {
+    if (playing && (patch.mode || patch.engine || patch.voice !== undefined || patch.hostVoice !== undefined || patch.studioVoice || patch.studioHost || patch.cloudVoice || patch.cloudHost)) {
       // Rebuild the queue with the new mode/voice, keeping roughly the same place.
       setTimeout(() => {
         const { book: b, ch: c, para: p } = live.current
@@ -233,6 +236,13 @@ export default function App() {
     engine.current.pause()
     setPlaying(false)
     previewAudio.current?.pause()
+    if (kind === 'cloud') {
+      try {
+        previewAudio.current = new Audio(await synthCloud('It was the best of times, it was the worst of times.', value))
+        previewAudio.current.play()
+      } catch (e) { setNotice(e.message) }
+      return
+    }
     if (kind === 'device') return previewDevice(voices.find((v) => v.name === value) || resolved.narrator, prefs.rate)
     try {
       if (!studioReady()) {
@@ -262,6 +272,26 @@ export default function App() {
       setStudio({ status: 'error', progress: 0 })
       setNotice('Studio voices could not start on this device.')
     }
+  }
+
+  // Premium (Google Cloud) voices: discover whether the site has a key, then list voices.
+  useEffect(() => { serverStatus().then((server) => setCloud((c) => ({ ...c, server }))) }, [])
+
+  const refreshCloud = async (cfgPatch = {}) => {
+    const cfg = setCloudConfig(cfgPatch)
+    setCloud((c) => ({ ...c, cfg, status: 'loading', error: '' }))
+    try {
+      const voices = await listCloudVoices(cfg)
+      setCloud((c) => ({ ...c, cfg, voices, status: 'ready', error: '' }))
+      return true
+    } catch (e) {
+      setCloud((c) => ({ ...c, cfg, voices: [], status: 'error', error: e.message }))
+      return false
+    }
+  }
+
+  const useCloud = async (cfgPatch) => {
+    if (await refreshCloud(cfgPatch)) updatePrefs({ engine: 'cloud' })
   }
 
   const setSleepTimer = (mins) => {
@@ -335,7 +365,8 @@ export default function App() {
           />
           <Player
             book={book} ch={ch} para={para} total={paras.length} playing={playing} prefs={prefs}
-            voices={englishVoices(voices)} sleep={sleep} supported={supported || prefs.engine === 'studio'}
+            voices={englishVoices(voices)} sleep={sleep} supported={supported || prefs.engine !== 'device'}
+            cloud={cloud} onCloud={refreshCloud} onUseCloud={useCloud}
             studio={studio} buffering={buffering} notice={notice} onDismiss={() => setNotice('')}
             onEnableStudio={enableStudio} onPreview={preview}
             onToggle={toggle} onPrevCh={() => step(-1)} onNextCh={() => step(1)}

@@ -239,3 +239,10 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   .shelf { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 36px 18px; }
   .foil-frame strong { font-size: 17px; } .foil-frame { padding: 12px 8px 10px 16px; }
 }
+
+.seg.small button { font-size: 14px; padding: 5px 14px; }
+.seg.small button.on { background: var(--brass); color: #2a1810; }
+.keyform { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; max-width: 640px; }
+.keyform input { flex: 1 1 280px; background: #1c110b; color: var(--paper); border: 1px solid rgba(236,208,142,.35); border-radius: 6px; padding: 8px 10px; font-family: var(--serif); letter-spacing: 0; font-size: 16px; }
+.keyform .hint { flex-basis: 100%; }
+.hint.err { color: #f6b9ad; font-style: normal; }

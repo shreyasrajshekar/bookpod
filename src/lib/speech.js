@@ -1,5 +1,4 @@
 import { speechChunks } from './textBook.js'
-import { synth } from './studio.js'
 
 export const supported = typeof window !== 'undefined' && 'speechSynthesis' in window
 
@@ -49,7 +48,7 @@ export const hostOutro = (ch, next) =>
  * the narrator voice reads the paragraphs. Every item knows which paragraph it belongs to
  * so the page can highlight and the reader can seek.
  *
- * Two backends: 'device' (speechSynthesis) and 'studio' (Kokoro neural audio, synthesised a few
+ * Two backends: 'device' (speechSynthesis) and 'audio' (neural or cloud clips, synthesised a few
  * chunks ahead and played through an <audio> element).
  */
 export class Engine {
@@ -60,11 +59,12 @@ export class Engine {
     this.token = 0
     this.playing = false
     this.rate = 1
-    this.backend = 'device'
+    this.backend = 'device' // 'device' | 'audio' (neural/cloud clips played via <audio>)
+    this.synthesize = null // (text, voiceId) => Promise<objectUrl>
     this.narrator = null // SpeechSynthesisVoice
     this.host = null
-    this.studioNarrator = 'af_heart'
-    this.studioHost = 'am_michael'
+    this.audioNarrator = ''
+    this.audioHost = ''
     this.audio = null
     this.cache = new Map()
   }
@@ -109,7 +109,7 @@ export class Engine {
       this.i++
       this.speak()
     }
-    if (this.backend === 'studio') return this.speakStudio(item, token, next)
+    if (this.backend === 'audio') return this.speakStudio(item, token, next)
 
     const u = new SpeechSynthesisUtterance(item.text)
     const voice = item.host ? this.host || this.narrator : this.narrator
@@ -128,9 +128,9 @@ export class Engine {
   audioFor(idx) {
     const item = this.items[idx]
     if (!item) return null
-    const voice = item.host ? this.studioHost : this.studioNarrator
+    const voice = item.host ? this.audioHost : this.audioNarrator
     const key = voice + '|' + item.text
-    if (!this.cache.has(key)) this.cache.set(key, synth(item.text, voice))
+    if (!this.cache.has(key)) this.cache.set(key, this.synthesize(item.text, voice))
     return { key, promise: this.cache.get(key) }
   }
 
@@ -173,7 +173,7 @@ export class Engine {
 
   pause() {
     this.playing = false
-    if (this.backend === 'studio' && this.audio && !this.audio.ended) {
+    if (this.backend === 'audio' && this.audio && !this.audio.ended) {
       this.audio.pause() // keep position; resume() continues mid-sentence
       return
     }
@@ -185,7 +185,7 @@ export class Engine {
   resume() {
     if (!this.items.length) return
     this.playing = true
-    if (this.backend === 'studio' && this.audio && this.audio.paused) {
+    if (this.backend === 'audio' && this.audio && this.audio.paused) {
       this.audio.play()
       return
     }

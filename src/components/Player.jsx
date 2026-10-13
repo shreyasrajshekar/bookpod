@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { cloudReady } from '../lib/cloud.js'
 import { Icon } from './Ornament.jsx'
 import { STUDIO_VOICES } from '../lib/studio.js'
 import { voiceTier } from '../lib/speech.js'
@@ -6,8 +7,14 @@ import { voiceTier } from '../lib/speech.js'
 const RATES = [0.8, 1, 1.15, 1.3, 1.5, 1.75, 2]
 const SLEEP = [0, 10, 20, 30, 60]
 
-export function Player({ book, ch, para, total, playing, prefs, voices, sleep, supported, studio, buffering, notice, onDismiss, onEnableStudio, onPreview, onToggle, onPrevCh, onNextCh, onSkip, onSeek, onPrefs, onSleep }) {
+export function Player({ book, ch, para, total, playing, prefs, voices, sleep, supported, studio, cloud, onCloud, onUseCloud, buffering, notice, onDismiss, onEnableStudio, onPreview, onToggle, onPrevCh, onNextCh, onSkip, onSeek, onPrefs, onSleep }) {
   const [open, setOpen] = useState(false)
+  const [tab, setTab] = useState(prefs.engine)
+  const [keyDraft, setKeyDraft] = useState(cloud.cfg.key)
+  const [codeDraft, setCodeDraft] = useState(cloud.cfg.code)
+  const server = cloud.server
+  const ready = cloud.cfg.mode === 'included' ? !!server?.enabled : !!cloud.cfg.key
+  useEffect(() => { if (open && tab === 'cloud' && ready && cloud.status === 'idle') onCloud() }, [open, tab, ready, cloud.status]) // eslint-disable-line
   const chapter = book.chapters[ch]
   const pct = total > 1 ? (para / (total - 1)) * 100 : 0
   const nextSleep = () => onSleep(SLEEP[(SLEEP.indexOf(sleep?.set ?? 0) + 1) % SLEEP.length])
@@ -63,9 +70,12 @@ export function Player({ book, ch, para, total, playing, prefs, voices, sleep, s
       {open && (
         <div className="voice-panel">
           <div className="seg" role="tablist" aria-label="Voice engine">
-            <button role="tab" aria-selected={prefs.engine === 'device'} onClick={() => onPrefs({ engine: 'device' })}>Device voices</button>
-            <button role="tab" aria-selected={prefs.engine === 'studio'} onClick={() => (studio.status === 'ready' ? onPrefs({ engine: 'studio' }) : onEnableStudio())} disabled={studio.status === 'loading'}>
-              Studio voices <small>AI</small>
+            <button role="tab" aria-selected={tab === 'device'} onClick={() => { setTab('device'); onPrefs({ engine: 'device' }) }}>Device</button>
+            <button role="tab" aria-selected={tab === 'studio'} onClick={() => { setTab('studio'); studio.status === 'ready' ? onPrefs({ engine: 'studio' }) : onEnableStudio() }} disabled={studio.status === 'loading'}>
+              Studio <small>AI</small>
+            </button>
+            <button role="tab" aria-selected={tab === 'cloud'} onClick={() => { setTab('cloud'); if (ready) onUseCloud({}) }}>
+              Premium <small>Google</small>
             </button>
           </div>
 
@@ -74,7 +84,7 @@ export function Player({ book, ch, para, total, playing, prefs, voices, sleep, s
               <span className="bar"><i style={{ width: `${studio.progress * 100}%` }} /></span></p>
           )}
 
-          {prefs.engine === 'device' ? (
+          {tab === 'device' ? (
             <>
               <p className="hint">These come from your browser or operating system. Voices marked Natural sound best — on Edge, look for “Online (Natural)”.</p>
               <div className="pickers">
@@ -98,7 +108,7 @@ export function Player({ book, ch, para, total, playing, prefs, voices, sleep, s
                 </label>
               </div>
             </>
-          ) : (
+          ) : tab === 'studio' ? (
             <>
               <p className="hint">Neural voices generated on your device. Slightly slower to start, much more lifelike.</p>
               <div className="pickers">
@@ -119,6 +129,50 @@ export function Player({ book, ch, para, total, playing, prefs, voices, sleep, s
                   </span>
                 </label>
               </div>
+            </>
+          ) : (
+            <>
+              <p className="hint">Studio-grade voices from Google Cloud Text-to-Speech. Audio is cached on this device so listening again costs nothing.</p>
+              <div className="seg small" role="radiogroup" aria-label="Where the key comes from">
+                {server?.enabled && <button role="radio" aria-checked={cloud.cfg.mode === 'included'} className={cloud.cfg.mode === 'included' ? 'on' : ''} onClick={() => onCloud({ mode: 'included' })}>Included with this site</button>}
+                <button role="radio" aria-checked={cloud.cfg.mode === 'own'} className={cloud.cfg.mode === 'own' ? 'on' : ''} onClick={() => onCloud({ mode: 'own' })}>My own Google key</button>
+              </div>
+              {cloud.cfg.mode === 'own' ? (
+                <form className="keyform" onSubmit={(e) => { e.preventDefault(); onUseCloud({ mode: 'own', key: keyDraft.trim() }) }}>
+                  <input type="password" autoComplete="off" spellCheck="false" placeholder="Paste your Google Cloud API key" value={keyDraft} onChange={(e) => setKeyDraft(e.target.value)} aria-label="Google Cloud API key" />
+                  <button className="chip on" type="submit" disabled={!keyDraft.trim() || cloud.status === 'loading'}>{cloud.status === 'loading' ? 'Checking…' : 'Save & use'}</button>
+                  <p className="hint">Stays in this browser and is only ever sent to Google. In Google Cloud, enable “Cloud Text-to-Speech API”, create an API key, and restrict it to this site and that API. Google has a monthly free tier.</p>
+                </form>
+              ) : (
+                server?.needsCode && (
+                  <form className="keyform" onSubmit={(e) => { e.preventDefault(); onUseCloud({ mode: 'included', code: codeDraft.trim() }) }}>
+                    <input type="password" autoComplete="off" placeholder="Access code" value={codeDraft} onChange={(e) => setCodeDraft(e.target.value)} aria-label="Access code" />
+                    <button className="chip on" type="submit">Use included voices</button>
+                  </form>
+                )
+              )}
+              {cloud.cfg.mode === 'included' && !server?.needsCode && cloud.status !== 'ready' && <button className="chip on" onClick={() => onUseCloud({ mode: 'included' })}>Use included voices</button>}
+              {cloud.error && <p className="hint err" role="alert">{cloud.error}</p>}
+              {cloud.status === 'ready' && (
+                <div className="pickers">
+                  <label>Narrator
+                    <span className="pick">
+                      <select value={prefs.cloudVoice} onChange={(e) => onPrefs({ cloudVoice: e.target.value })}>
+                        {cloud.voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+                      </select>
+                      <button onClick={() => onPreview('cloud', prefs.cloudVoice)} aria-label="Preview narrator voice"><Icon name="play" /></button>
+                    </span>
+                  </label>
+                  <label>Host
+                    <span className="pick">
+                      <select value={prefs.cloudHost} onChange={(e) => onPrefs({ cloudHost: e.target.value })}>
+                        {cloud.voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+                      </select>
+                      <button onClick={() => onPreview('cloud', prefs.cloudHost)} aria-label="Preview host voice"><Icon name="play" /></button>
+                    </span>
+                  </label>
+                </div>
+              )}
             </>
           )}
         </div>
