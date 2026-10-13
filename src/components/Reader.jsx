@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Ornament } from './Ornament.jsx'
 import { countWords, minutesFor } from '../lib/textBook.js'
 
@@ -9,6 +9,15 @@ const roman = (n) => {
   return s
 }
 
+// Memoised so advancing the highlight re-renders only the paragraphs whose state changed.
+const Para = memo(function Para({ text, index, state, innerRef, onPick }) {
+  return (
+    <p ref={innerRef} className={`${index === 0 ? 'dropcap' : ''} ${state}`} onClick={() => onPick(index)} title="Listen from here">
+      {text}
+    </p>
+  )
+})
+
 export function Reader({ book, ch, para, paras, playing, rate, onPickChapter, onPickPara }) {
   const [tab, setTab] = useState('page')
   const active = useRef(null)
@@ -16,7 +25,7 @@ export function Reader({ book, ch, para, paras, playing, rate, onPickChapter, on
   const [kicker, ...restTitle] = chapter.title.split(/\s[—·]\s|:\s/)
 
   useEffect(() => {
-    active.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    active.current?.scrollIntoView({ block: 'center', behavior: 'auto' })
   }, [para, ch])
 
   return (
@@ -64,15 +73,7 @@ export function Reader({ book, ch, para, paras, playing, rate, onPickChapter, on
           </header>
           <div className="prose">
             {paras.map((p, i) => (
-              <p
-                key={i}
-                ref={i === para ? active : null}
-                className={`${i === 0 ? 'dropcap' : ''} ${i === para ? 'reading' : ''} ${i < para ? 'read' : ''}`}
-                onClick={() => onPickPara(i)}
-                title="Listen from here"
-              >
-                {p}
-              </p>
+              <Para key={i} text={p} index={i} state={i === para ? 'reading' : i < para ? 'read' : ''} innerRef={i === para ? active : null} onPick={onPickPara} />
             ))}
           </div>
           <footer className="page-foot">

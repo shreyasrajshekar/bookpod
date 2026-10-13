@@ -31,7 +31,6 @@ body {
     linear-gradient(var(--grid) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid) 1px, transparent 1px);
   background-size: 28px 28px;
-  background-attachment: fixed;
 }
 button, select, input { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -108,7 +107,7 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 .page { position: relative; height: calc(100vh - 290px); min-height: 460px; overflow: hidden; background: #fff; border: 3px solid var(--ink); box-shadow: 7px 7px 0 var(--ink); }
 .page.left { border-radius: 26px 6px 6px 30px / 24px 8px 8px 28px; padding: 32px 38px 28px 44px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--ink) transparent; }
 .page.right { border-radius: 8px 28px 26px 6px / 8px 24px 28px 8px; display: flex; background-image: linear-gradient(90deg, transparent 54px, rgba(224,68,62,.5) 54px 56px, transparent 56px); }
-.page.right .turn { flex: 1; overflow-y: auto; padding: 34px 50px 40px 76px; scrollbar-width: thin; scrollbar-color: var(--ink) transparent; transform-origin: left center; animation: turn .8s cubic-bezier(.3,.7,.2,1) both; scroll-behavior: smooth; }
+.page.right .turn { flex: 1; overflow-y: auto; padding: 34px 50px 40px 76px; scrollbar-width: thin; scrollbar-color: var(--ink) transparent; transform-origin: left center; animation: turn .8s cubic-bezier(.3,.7,.2,1) both; }
 .bookmark-ribbon { position: absolute; z-index: 4; top: -4px; right: 54px; width: 22px; height: 78px; background: var(--red); border: 3px solid var(--ink); border-top: 0; border-radius: 0 0 4px 4px; }
 .bookmark-ribbon::after { content: ''; position: absolute; left: -3px; right: -3px; bottom: -3px; height: 14px; background: #fff; clip-path: polygon(0 100%, 50% 0, 100% 100%); }
 
@@ -136,7 +135,7 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 .subtitle { font-size: 26px; color: var(--ink-soft); margin: 4px 0 0; transform: rotate(-1deg); }
 .chapter-head .ornament { color: var(--ink); }
 
-.prose p { margin: 0; text-indent: 1.4em; line-height: 1.62; font-size: 23px; cursor: pointer; padding: 1px 8px; margin-left: -8px; margin-right: -8px; border-radius: 8px; transition: background .3s, color .3s; text-wrap: pretty; }
+.prose p { margin: 0; text-indent: 1.4em; line-height: 1.62; font-size: 23px; cursor: pointer; padding: 1px 8px; margin-left: -8px; margin-right: -8px; border-radius: 8px; transition: background .3s, color .3s; }
 .prose p + p { margin-top: 4px; }
 .prose p.dropcap { text-indent: 0; }
 .prose p.dropcap::first-letter { font-family: var(--hand); float: left; font-size: 4.2em; line-height: .8; padding: 6px 10px 0 0; color: var(--red); }
@@ -237,3 +236,9 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
   .foil-frame strong { font-size: 22px; }
   .book-face { padding-left: 22px; }
 }
+
+/* voice warm-up strip & small links */
+.warm { grid-column: 1 / -1; margin: 0; text-align: center; font-size: 18px; color: var(--ink-soft); }
+.warm .bar { display: block; height: 10px; margin: 4px auto 0; max-width: 420px; border: 2px solid var(--ink); border-radius: 6px; overflow: hidden; background: #fff; }
+.warm .bar i { display: block; height: 100%; background: var(--mint); transition: width .3s; }
+.notice .link { background: none; border: 0; text-decoration: underline; font: inherit; }

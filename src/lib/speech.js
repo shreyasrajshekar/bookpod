@@ -1,55 +1,43 @@
 import { speechChunks } from './textBook.js'
+import { synth } from './studio.js'
 
-export const supported = typeof window !== 'undefined' && 'speechSynthesis' in window
+const ONES = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen']
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty']
 
-export function getVoices() {
-  return new Promise((resolve) => {
-    if (!supported) return resolve([])
-    const have = speechSynthesis.getVoices()
-    if (have.length) return resolve(have)
-    const done = () => resolve(speechSynthesis.getVoices())
-    speechSynthesis.addEventListener('voiceschanged', done, { once: true })
-    setTimeout(done, 1200)
-  })
+function romanToInt(r) {
+  const v = { I: 1, V: 5, X: 10, L: 50, C: 100 }
+  let n = 0
+  for (let i = 0; i < r.length; i++) {
+    const cur = v[r[i]], nxt = v[r[i + 1]]
+    if (!cur) return NaN
+    n += nxt > cur ? -cur : cur
+  }
+  return n
 }
+const words = (n) => (n < 20 ? ONES[n] : TENS[Math.floor(n / 10)] + (n % 10 ? ' ' + ONES[n % 10] : ''))
 
-const score = (v) =>
-  (/natural|neural/i.test(v.name) ? 8 : 0) +
-  (/online|premium|enhanced|siri/i.test(v.name) ? 5 : 0) +
-  (/google|samantha|daniel|serena|aria|jenny|guy|ryan|libby|sonia|ava|allison|oliver/i.test(v.name) ? 2 : 0) +
-  (/^en-(us|gb)/i.test(v.lang) ? 1 : 0) +
-  (v.localService ? 0 : 1) -
-  (/espeak|compact|novelty|bad news|bells|boing|cellos|zarvox|whisper|trinoids|organ|albert|junior|ralph|fred/i.test(v.name) ? 20 : 0)
-
-export const voiceTier = (v) => (score(v) >= 8 ? 'Natural' : score(v) >= 4 ? 'Good' : 'Basic')
-
-export function englishVoices(voices) {
-  return voices.filter((v) => /^en/i.test(v.lang)).sort((a, b) => score(b) - score(a))
-}
-
-/** Say a short sample with a device voice (used by the Voices panel). */
-export function previewDevice(voice, rate = 1) {
-  if (!supported) return
-  speechSynthesis.cancel()
-  const u = new SpeechSynthesisUtterance('It was the best of times, it was the worst of times.')
-  if (voice) { u.voice = voice; u.lang = voice.lang }
-  u.rate = rate
-  speechSynthesis.speak(u)
+/** "Chapter IV — The Rabbit" → "Chapter four, The Rabbit": roman numerals are read as numbers, dashes as pauses. */
+export function speakable(title) {
+  return title
+    .replace(/\b(Chapter|Stave|Book|Part|Section|Act|Scene|Canto|Letter)\s+([IVXLC]+)\b/g, (m, kind, r) => {
+      const n = romanToInt(r)
+      return n >= 1 && n < 60 ? `${kind} ${words(n)}` : m
+    })
+    .replace(/\s*[—·]\s*/g, ', ')
 }
 
 export const hostIntro = (book, ch, mins) =>
-  `You're listening to BookPod. ${book.title}, by ${book.author}. ${ch.title}. About ${mins} ${mins === 1 ? 'minute' : 'minutes'}. Settle in.`
+  `You're listening to BookPod. ${book.title}, by ${book.author}. ${speakable(ch.title)}. About ${mins} ${mins === 1 ? 'minute' : 'minutes'}. Settle in.`
 
 export const hostOutro = (ch, next) =>
-  next ? `That was ${ch.title}. Coming up next: ${next.title}.` : `And that is the end of ${ch.title}. Thank you for listening.`
+  next ? `That was ${speakable(ch.title)}. Coming up next: ${speakable(next.title)}.` : `And that is the end of ${speakable(ch.title)}. Thank you for listening.`
+
+const AHEAD = 3 // clips synthesised in advance of the one playing
 
 /**
- * Plays an episode as a queue of utterances. The host voice frames each chapter;
- * the narrator voice reads the paragraphs. Every item knows which paragraph it belongs to
- * so the page can highlight and the reader can seek.
- *
- * Two backends: 'device' (speechSynthesis) and 'audio' (neural or cloud clips, synthesised a few
- * chunks ahead and played through an <audio> element).
+ * Plays an episode as a queue of clips. The host voice frames each chapter, the narrator reads the
+ * paragraphs. Every clip knows which paragraph it belongs to, so the page can highlight and seek.
+ * Synthesis happens in a worker a few clips ahead, so playback stays smooth and the page stays responsive.
  */
 export class Engine {
   constructor(handlers) {
@@ -59,12 +47,8 @@ export class Engine {
     this.token = 0
     this.playing = false
     this.rate = 1
-    this.backend = 'device' // 'device' | 'audio' (neural/cloud clips played via <audio>)
-    this.synthesize = null // (text, voiceId) => Promise<objectUrl>
-    this.narrator = null // SpeechSynthesisVoice
-    this.host = null
-    this.audioNarrator = ''
-    this.audioHost = ''
+    this.narrator = 'en_US-lessac-medium'
+    this.host = 'en_US-ryan-medium'
     this.audio = null
     this.cache = new Map()
   }
@@ -72,9 +56,7 @@ export class Engine {
   load({ intro, paragraphs, outro, startPara = 0 }) {
     const items = []
     if (intro) items.push({ text: intro, host: true, para: -1 })
-    paragraphs.forEach((p, para) => {
-      speechChunks(p).forEach((text) => items.push({ text, host: false, para }))
-    })
+    paragraphs.forEach((p, para) => speechChunks(p, 240).forEach((text) => items.push({ text, host: false, para })))
     if (outro) items.push({ text: outro, host: true, para: paragraphs.length })
     this.items = items
     this.i = 0
@@ -88,15 +70,26 @@ export class Engine {
   }
 
   start() {
-    if (this.backend === 'device' && !supported) return
     this.playing = true
     this.speak()
   }
 
-  speak() {
+  clip(idx) {
+    const item = this.items[idx]
+    if (!item) return null
+    const voice = item.host ? this.host : this.narrator
+    const key = voice + '|' + item.text
+    if (!this.cache.has(key)) {
+      const p = synth(item.text, voice)
+      p.catch(() => this.cache.delete(key)) // allow a retry
+      this.cache.set(key, p)
+    }
+    return { key, promise: this.cache.get(key) }
+  }
+
+  async speak() {
     const token = ++this.token
     this.stopAudio()
-    if (supported) speechSynthesis.cancel()
     const item = this.items[this.i]
     if (!item) {
       this.playing = false
@@ -104,63 +97,43 @@ export class Engine {
       return
     }
     this.h.onItem?.(item)
+    const cur = this.clip(this.i)
+    // Queue the next few clips right away so the worker is never idle while we play.
+    const keep = new Set([cur.key])
+    for (let n = 1; n <= AHEAD; n++) { const c = this.clip(this.i + n); if (c) keep.add(c.key) }
+
+    let url
+    let waited = false
+    const t = setTimeout(() => { waited = true; this.h.onBuffering?.(true) }, 250)
+    try {
+      url = await cur.promise
+    } catch (e) {
+      clearTimeout(t)
+      this.h.onBuffering?.(false)
+      if (token === this.token) this.h.onError?.(e)
+      return
+    }
+    clearTimeout(t)
+    if (waited) this.h.onBuffering?.(false)
+    if (token !== this.token) return
+
+    // Free clips we've moved past.
+    for (const [k, p] of this.cache) {
+      if (!keep.has(k) && this.cache.size > AHEAD + 4) { this.cache.delete(k); p.then((u) => URL.revokeObjectURL(u)).catch(() => {}) }
+    }
     const next = () => {
       if (token !== this.token) return
       this.i++
       this.speak()
     }
-    if (this.backend === 'audio') return this.speakStudio(item, token, next)
-
-    const u = new SpeechSynthesisUtterance(item.text)
-    const voice = item.host ? this.host || this.narrator : this.narrator
-    if (voice) { u.voice = voice; u.lang = voice.lang }
-    u.rate = Math.min(2, this.rate * (item.host ? 1.02 : 1))
-    u.pitch = item.host ? 1.08 : 1
-    u.onend = next
-    u.onerror = (e) => {
-      if (token !== this.token || e.error === 'canceled' || e.error === 'interrupted') return
-      next()
-    }
-    // Chrome silently drops a few utterances if speak() runs in the same tick as cancel().
-    setTimeout(() => token === this.token && speechSynthesis.speak(u), 30)
-  }
-
-  audioFor(idx) {
-    const item = this.items[idx]
-    if (!item) return null
-    const voice = item.host ? this.audioHost : this.audioNarrator
-    const key = voice + '|' + item.text
-    if (!this.cache.has(key)) this.cache.set(key, this.synthesize(item.text, voice))
-    return { key, promise: this.cache.get(key) }
-  }
-
-  async speakStudio(item, token, next) {
-    const cur = this.audioFor(this.i)
-    this.h.onBuffering?.(true)
-    let url
-    try {
-      url = await cur.promise
-    } catch (e) {
-      this.cache.delete(cur.key)
-      this.h.onBuffering?.(false)
-      if (token === this.token) this.h.onError?.(e)
-      return
-    }
-    if (token !== this.token) return
-    this.h.onBuffering?.(false)
-    // Keep two chunks of synthesis running ahead, and free what we've already played.
-    const keep = new Set([cur.key])
-    for (const n of [1, 2]) { const a = this.audioFor(this.i + n); if (a) keep.add(a.key) }
-    for (const [k, p] of this.cache) {
-      if (!keep.has(k) && this.cache.size > 6) { this.cache.delete(k); p.then((u) => URL.revokeObjectURL(u)).catch(() => {}) }
-    }
     const a = new Audio(url)
+    a.defaultPlaybackRate = this.rate // media load resets playbackRate to this, so set both
     a.playbackRate = this.rate
     a.preservesPitch = true
     a.onended = next
     a.onerror = next
     this.audio = a
-    try { await a.play() } catch { /* autoplay blocked: user will press play */ }
+    a.play().catch(() => {})
   }
 
   stopAudio() {
@@ -173,43 +146,36 @@ export class Engine {
 
   pause() {
     this.playing = false
-    if (this.backend === 'audio' && this.audio && !this.audio.ended) {
+    if (this.audio && !this.audio.ended) {
       this.audio.pause() // keep position; resume() continues mid-sentence
       return
     }
-    this.token++ // detach pending callbacks
-    this.stopAudio()
-    if (supported) speechSynthesis.cancel()
+    this.token++
   }
 
   resume() {
     if (!this.items.length) return
     this.playing = true
-    if (this.backend === 'audio' && this.audio && this.audio.paused) {
-      this.audio.play()
-      return
-    }
-    this.speak() // device: restart the current sentence; reliable across browsers
+    if (this.audio && this.audio.paused) this.audio.play()
+    else this.speak()
   }
 
   skipToPara(para) {
     const idx = this.items.findIndex((it) => !it.host && it.para >= para)
     this.i = idx === -1 ? this.items.length : idx
     if (this.playing) this.speak()
-    else this.stopAudio()
+    else { this.token++; this.stopAudio() }
   }
 
   setRate(r) {
     this.rate = r
-    if (this.audio) this.audio.playbackRate = r
-    else if (this.playing) this.speak()
+    if (this.audio) this.audio.defaultPlaybackRate = this.audio.playbackRate = r
   }
 
   stop() {
     this.playing = false
     this.token++
     this.stopAudio()
-    if (supported) speechSynthesis.cancel()
     this.items = []
     this.clearCache()
   }
