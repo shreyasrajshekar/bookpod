@@ -18,7 +18,7 @@ export function Library({ books, progress, busy, error, onAddFiles, onOpen, onDe
     <main className="library">
       <section className="hero">
         <p className="eyebrow">A private reading room for your ears</p>
-        <h1>Turn any book into a podcast.</h1>
+        <h1>Turn any book into a <mark>podcast</mark>.</h1>
         <Ornament />
         <p className="lede">
           Drop in an EPUB, PDF or text file. BookPod binds it into chapters, one episode each, and a pair of voices reads it

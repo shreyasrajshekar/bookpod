@@ -10,7 +10,9 @@ import { Engine, englishVoices, getVoices, hostIntro, hostOutro, previewDevice, 
 import { loadStudio, studioReady, synth } from './lib/studio.js'
 import { cloudReady, getCloudConfig, listCloudVoices, serverStatus, setCloudConfig, synthCloud } from './lib/cloud.js'
 
-const displayParas = (book, ch, mode) => (mode === 'condensed' ? condense(book.chapters[ch].paragraphs) : book.chapters[ch].paragraphs)
+// Gutenberg marks italics with _underscores_; drop the markers so they're neither shown nor spoken.
+const plain = (ps) => ps.map((p) => p.replace(/_([^_]+)_/g, '$1'))
+const displayParas = (book, ch, mode) => plain(mode === 'condensed' ? condense(book.chapters[ch].paragraphs) : book.chapters[ch].paragraphs)
 
 export default function App() {
   const [books, setBooks] = useState([])

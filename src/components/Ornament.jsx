@@ -1,10 +1,9 @@
 export function Ornament({ className = '' }) {
   return (
-    <svg className={`ornament ${className}`} viewBox="0 0 220 24" aria-hidden="true">
-      <path d="M10 12h78M132 12h78" stroke="currentColor" strokeWidth="1" />
-      <path d="M110 3c4 5 9 7 14 9-5 2-10 4-14 9-4-5-9-7-14-9 5-2 10-4 14-9z" fill="currentColor" />
-      <circle cx="92" cy="12" r="2" fill="currentColor" />
-      <circle cx="128" cy="12" r="2" fill="currentColor" />
+    <svg className={`ornament ${className}`} viewBox="0 0 220 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 14c14-9 22 9 36 0s22 9 36 0 16 3 24-2" />
+      <path d="M110 12l3.5-8 3.5 8 8 1.5-6 5 2 8-7.5-4.5-7.5 4.5 2-8-6-5z" transform="translate(-1 -3) scale(.85)" fill="currentColor" stroke="none" />
+      <path d="M130 12c8 5 8-7 24 0s22-9 36 0 14 9 24-2" />
     </svg>
   )
 }
