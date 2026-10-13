@@ -6,7 +6,8 @@ import { Icon } from './components/Ornament.jsx'
 import { condense, countWords, minutesFor } from './lib/textBook.js'
 import { loadBookFile, loadSample, SAMPLES } from './lib/loadBook.js'
 import { deleteBook, getPrefs, getProgress, listBooks, markSeeded, saveBook, setPrefs as savePrefs, setProgress, wasSeeded } from './lib/store.js'
-import { Engine, englishVoices, getVoices, hostIntro, hostOutro, supported } from './lib/speech.js'
+import { Engine, englishVoices, getVoices, hostIntro, hostOutro, previewDevice, supported } from './lib/speech.js'
+import { loadStudio, studioReady, synth } from './lib/studio.js'
 
 const displayParas = (book, ch, mode) => (mode === 'condensed' ? condense(book.chapters[ch].paragraphs) : book.chapters[ch].paragraphs)
 
@@ -22,6 +23,10 @@ export default function App() {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [sleep, setSleep] = useState(null)
+  const [studio, setStudio] = useState({ status: studioReady() ? 'ready' : 'idle', progress: 0 })
+  const [buffering, setBuffering] = useState(false)
+  const [notice, setNotice] = useState('')
+  const previewAudio = useRef(null)
 
   const book = useMemo(() => books.find((b) => b.id === bookId) || null, [books, bookId])
   const paras = useMemo(() => (book ? displayParas(book, ch, prefs.mode) : []), [book, ch, prefs.mode])
@@ -43,6 +48,23 @@ export default function App() {
   const startEpisode = useCallback((chIdx, startPara = 0) => {
     const { book: b, prefs: p } = live.current
     if (!b) return
+    if (p.engine === 'studio' && !studioReady()) {
+      // First use: fetch the neural model, then begin.
+      setStudio({ status: 'loading', progress: 0 })
+      setPlaying(true)
+      loadStudio((pr) => setStudio({ status: 'loading', progress: pr }))
+        .then(() => { setStudio({ status: 'ready', progress: 1 }); startEpisode(chIdx, startPara) })
+        .catch((err) => {
+          console.error(err)
+          setStudio({ status: 'error', progress: 0 })
+          setNotice('Studio voices could not start on this device, so BookPod switched back to device voices.')
+          setPlaying(false)
+          const next = { ...live.current.prefs, engine: 'device' }
+          setPrefsState(next)
+          savePrefs(next)
+        })
+      return
+    }
     const list = displayParas(b, chIdx, p.mode)
     const chapter = b.chapters[chIdx]
     const mins = minutesFor(countWords(list.join(' ')), p.rate)
@@ -51,6 +73,9 @@ export default function App() {
     e.narrator = resolved.narrator
     e.host = resolved.host
     e.rate = p.rate
+    e.backend = p.engine
+    e.studioNarrator = p.studioVoice
+    e.studioHost = p.studioHost
     e.load({ intro: hostIntro(b, chapter, mins), paragraphs: list, outro: hostOutro(chapter, next), startPara })
     loadedKey.current = `${b.id}:${chIdx}:${p.mode}`
     e.start()
@@ -65,6 +90,13 @@ export default function App() {
         if (item.para >= 0) setPara(Math.min(item.para, total - 1))
       },
       onEnd: () => live.current.advance(),
+      onBuffering: (v) => setBuffering(v),
+      onError: (err) => {
+        console.error(err)
+        engine.current.pause()
+        setPlaying(false)
+        setNotice('Studio voice failed: ' + (err?.message || 'unknown error') + '. Try device voices.')
+      },
     })
     return () => engine.current.stop()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -126,7 +158,7 @@ export default function App() {
     savePrefs(next)
     const e = engine.current
     if (patch.rate && e) e.setRate(patch.rate)
-    if (playing && (patch.mode || patch.voice !== undefined || patch.hostVoice !== undefined)) {
+    if (playing && (patch.mode || patch.engine || patch.voice !== undefined || patch.hostVoice !== undefined || patch.studioVoice || patch.studioHost)) {
       // Rebuild the queue with the new mode/voice, keeping roughly the same place.
       setTimeout(() => {
         const { book: b, ch: c, para: p } = live.current
@@ -195,6 +227,41 @@ export default function App() {
   const step = (dir) => {
     const i = ch + dir
     if (i >= 0 && i < book.chapters.length) pickChapter(i)
+  }
+
+  const preview = async (kind, value) => {
+    engine.current.pause()
+    setPlaying(false)
+    previewAudio.current?.pause()
+    if (kind === 'device') return previewDevice(voices.find((v) => v.name === value) || resolved.narrator, prefs.rate)
+    try {
+      if (!studioReady()) {
+        setStudio({ status: 'loading', progress: 0 })
+        await loadStudio((pr) => setStudio({ status: 'loading', progress: pr }))
+        setStudio({ status: 'ready', progress: 1 })
+      }
+      const url = await synth('It was the best of times, it was the worst of times.', value)
+      previewAudio.current = new Audio(url)
+      previewAudio.current.play()
+    } catch (e) {
+      console.error(e)
+      setStudio({ status: 'error', progress: 0 })
+      setNotice('Studio voices could not start on this device.')
+    }
+  }
+
+  const enableStudio = async () => {
+    setNotice('')
+    try {
+      setStudio({ status: 'loading', progress: 0 })
+      await loadStudio((pr) => setStudio({ status: 'loading', progress: pr }))
+      setStudio({ status: 'ready', progress: 1 })
+      updatePrefs({ engine: 'studio' })
+    } catch (e) {
+      console.error(e)
+      setStudio({ status: 'error', progress: 0 })
+      setNotice('Studio voices could not start on this device.')
+    }
   }
 
   const setSleepTimer = (mins) => {
@@ -268,7 +335,9 @@ export default function App() {
           />
           <Player
             book={book} ch={ch} para={para} total={paras.length} playing={playing} prefs={prefs}
-            voices={englishVoices(voices)} sleep={sleep} supported={supported}
+            voices={englishVoices(voices)} sleep={sleep} supported={supported || prefs.engine === 'studio'}
+            studio={studio} buffering={buffering} notice={notice} onDismiss={() => setNotice('')}
+            onEnableStudio={enableStudio} onPreview={preview}
             onToggle={toggle} onPrevCh={() => step(-1)} onNextCh={() => step(1)}
             onSkip={(n) => goTo(para + n)} onSeek={(v) => goTo(v)} onPrefs={updatePrefs} onSleep={setSleepTimer}
           />

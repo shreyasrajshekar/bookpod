@@ -33,7 +33,7 @@ const write = (k, v) => {
 }
 export const getProgress = (id) => read(`bookpod:progress:${id}`, { ch: 0, p: 0 })
 export const setProgress = (id, v) => write(`bookpod:progress:${id}`, v)
-export const getPrefs = () => ({ rate: 1, mode: 'full', voice: '', hostVoice: '', ...read('bookpod:prefs', {}) })
+export const getPrefs = () => ({ rate: 1, mode: 'full', voice: '', hostVoice: '', engine: 'device', studioVoice: 'af_heart', studioHost: 'am_michael', ...read('bookpod:prefs', {}) })
 export const setPrefs = (v) => write('bookpod:prefs', v)
 export const wasSeeded = () => read('bookpod:seeded', false)
 export const markSeeded = () => write('bookpod:seeded', true)

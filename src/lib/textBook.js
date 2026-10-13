@@ -132,6 +132,10 @@ export function parseTextBook(raw, filename = '') {
   const { text, meta } = stripGutenberg(raw)
   const { title, author } = sniffMeta(meta.slice(0, 4000), filename)
   const { chapters, totalWords } = buildChapters(text)
+  // Drop a repeated title / byline at the very top of the first chapter.
+  const ps = chapters[0]?.paragraphs
+  const norm = (x) => x.toLowerCase().replace(/[^a-z]/g, '')
+  while (ps && ps.length > 3 && ps[0].length < 90 && (norm(ps[0]) === norm(title) || /^by\s/i.test(ps[0]) || norm(ps[0]) === norm(author))) ps.shift()
   return { title, author, chapters, totalWords }
 }
 
