@@ -3,12 +3,17 @@
 //
 // Pieces: piper-phonemize (WASM, text → phoneme ids) + onnxruntime-web (the voice model) + Cache API (model files).
 // The phonemizer glue is emscripten output that peeks at the DOM; give it an empty one.
+
+// Everything except the voice models ships with the site (no third-party CDNs to get blocked).
+import ortSimdThreaded from '../../node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm?url'
+import ortSimd from '../../node_modules/onnxruntime-web/dist/ort-wasm-simd.wasm?url'
+import phonemizeWasm from '../../node_modules/@diffusionstudio/piper-wasm/build/piper_phonemize.wasm?url'
+import phonemizeData from '../../node_modules/@diffusionstudio/piper-wasm/build/piper_phonemize.data?url'
+
 self.window = self
 self.document = self.document || { currentScript: { src: self.location.href }, baseURI: self.location.href, querySelectorAll: () => [], querySelector: () => null, getElementsByTagName: () => [] }
 
 const HF = 'https://huggingface.co/diffusionstudio/piper-voices/resolve/main'
-const PHONEMIZE = 'https://cdn.jsdelivr.net/npm/@diffusionstudio/piper-wasm@1.0.0/build/piper_phonemize'
-const ORT_WASM = 'https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.18.0/'
 
 const modelUrl = (id) => {
   const [region, name, quality] = id.split('-')
@@ -19,24 +24,51 @@ let state = null // { ort, cfg, session, phonemize }
 let loading = null
 let queue = Promise.resolve()
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/** Download with a stall watchdog and byte-range resume, so a flaky connection doesn't strand the user. */
+async function download(url, onProgress) {
+  let parts = []
+  let loaded = 0
+  let total = 0
+  let lastError = ''
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const ctl = new AbortController()
+    let timer
+    const bump = () => { clearTimeout(timer); timer = setTimeout(() => ctl.abort(), 15000) }
+    try {
+      bump()
+      const res = await fetch(url, { signal: ctl.signal, headers: loaded ? { Range: 'bytes=' + loaded + '-' } : {} })
+      if (!res.ok && res.status !== 206) throw new Error('HTTP ' + res.status)
+      if (loaded && res.status !== 206) { parts = []; loaded = 0 } // server ignored the range: start over
+      const len = Number(res.headers.get('content-length')) || 0
+      if (!total || !loaded) total = loaded + len
+      const reader = res.body.getReader()
+      for (;;) {
+        const { done, value } = await reader.read()
+        bump()
+        if (done) break
+        parts.push(value)
+        loaded += value.length
+        if (total) onProgress?.(Math.min(1, loaded / total))
+      }
+      clearTimeout(timer)
+      return new Blob(parts)
+    } catch (e) {
+      clearTimeout(timer)
+      lastError = e.name === 'AbortError' ? 'the connection stalled' : e.message
+      if (e instanceof TypeError) { parts = []; loaded = 0 } // network/CORS failure: don't trust partial data
+      await sleep(800 * (attempt + 1))
+    }
+  }
+  throw new Error('Couldn’t download the voice (' + lastError + ').')
+}
+
 async function cached(url, onProgress) {
   const cache = await caches.open('bookpod-voices-v1').catch(() => null)
   const hit = cache && (await cache.match(url))
   if (hit) return hit.arrayBuffer()
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Couldn’t download the voice (${res.status}).`)
-  const total = Number(res.headers.get('content-length')) || 0
-  const reader = res.body.getReader()
-  const parts = []
-  let loaded = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    parts.push(value)
-    loaded += value.length
-    if (total) onProgress?.(Math.min(1, loaded / total))
-  }
-  const blob = new Blob(parts)
+  const blob = await download(url, onProgress)
   cache?.put(url, new Response(blob)).catch(() => {})
   return blob.arrayBuffer()
 }
@@ -47,7 +79,7 @@ async function load(voiceId, onProgress) {
     loading = (async () => {
       const base = modelUrl(voiceId)
       const ort = await import('onnxruntime-web/wasm')
-      ort.env.wasm.wasmPaths = ORT_WASM
+      ort.env.wasm.wasmPaths = { 'ort-wasm-simd-threaded.wasm': ortSimdThreaded, 'ort-wasm-simd.wasm': ortSimd }
       // Several threads need SharedArrayBuffer, i.e. cross-origin isolation (see vercel.json); otherwise one.
       ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, Math.max(1, Math.floor((navigator.hardwareConcurrency || 2) / 2))) : 1
       const cfg = JSON.parse(new TextDecoder().decode(await cached(base + '.onnx.json')))
@@ -72,7 +104,7 @@ async function getPhonemizer() {
     phonemizer = state.createPiperPhonemize({
       print: (data) => pending?.resolve(JSON.parse(data).phoneme_ids),
       printErr: (msg) => pending?.reject(new Error(msg)),
-      locateFile: (url) => (url.endsWith('.wasm') ? PHONEMIZE + '.wasm' : url.endsWith('.data') ? PHONEMIZE + '.data' : url),
+      locateFile: (url) => (url.endsWith('.wasm') ? phonemizeWasm : url.endsWith('.data') ? phonemizeData : url),
     }).catch((e) => {
       phonemizer = null
       throw e

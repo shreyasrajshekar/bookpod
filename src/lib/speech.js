@@ -50,6 +50,7 @@ export class Engine {
     this.narrator = 'en_US-lessac-medium'
     this.host = 'en_US-ryan-medium'
     this.audio = null
+    this.hostReady = () => true // host lines fall back to the narrator until the host voice is loaded
     this.cache = new Map()
   }
 
@@ -77,7 +78,7 @@ export class Engine {
   clip(idx) {
     const item = this.items[idx]
     if (!item) return null
-    const voice = item.host ? this.host : this.narrator
+    const voice = item.host && this.hostReady() ? this.host : this.narrator
     const key = voice + '|' + item.text
     if (!this.cache.has(key)) {
       const p = synth(item.text, voice)

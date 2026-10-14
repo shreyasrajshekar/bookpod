@@ -23,7 +23,7 @@ export function Player({ book, ch, para, total, playing, prefs, sleep, supported
       {!supported && <p className="unsupported">This browser can’t run the voice engine. Try a recent Chrome, Edge, Firefox or Safari.</p>}
       {warming && (
         <p className="warm" role="status">
-          Warming up the voices — one-time download, about 60 MB each… {Math.round(studio.progress * 100)}%
+          Warming up the voice — one-time download, about 60 MB… {Math.round(studio.progress * 100)}%
           <span className="bar"><i style={{ width: `${studio.progress * 100}%` }} /></span>
         </p>
       )}

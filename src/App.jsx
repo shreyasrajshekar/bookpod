@@ -41,15 +41,17 @@ export default function App() {
   const startToken = useRef(0)
 
   /** Download the voice model once; safe to call repeatedly. */
-  const ensureVoices = useCallback((ids) => {
-    const want = ids || [live.current.prefs.studioVoice, live.current.prefs.studioHost]
-    if (voicesReady(...want)) return Promise.resolve()
-    setStudio((s) => (s.status === 'loading' ? s : { status: 'loading', progress: 0 }))
-    return loadVoices(want, (progress) => setStudio({ status: 'loading', progress }))
-      .then(() => setStudio({ status: 'ready', progress: 1 }))
+  const ensureVoices = useCallback((narrator, host) => {
+    const { studioVoice, studioHost } = live.current.prefs
+    narrator = narrator || studioVoice
+    host = host || studioHost
+    if (voicesReady(narrator)) { loadVoices(narrator, host).catch(() => {}); return Promise.resolve() }
+    setStudio((s) => (s.status === 'loading' ? s : { status: 'loading', progress: 0, error: '' }))
+    return loadVoices(narrator, host, (progress) => setStudio({ status: 'loading', progress, error: '' }))
+      .then(() => setStudio({ status: 'ready', progress: 1, error: '' }))
       .catch((e) => {
         console.error(e)
-        setStudio({ status: 'error', progress: 0 })
+        setStudio({ status: 'error', progress: 0, error: e.message || String(e) })
         throw e
       })
   }, [])
@@ -59,10 +61,10 @@ export default function App() {
     if (!b) return
     const my = ++startToken.current
     setPlaying(true)
-    if (!voicesReady(p.studioVoice, p.studioHost)) {
-      try { await ensureVoices([p.studioVoice, p.studioHost]) } catch {
+    if (!voicesReady(p.studioVoice)) {
+      try { await ensureVoices(p.studioVoice, p.studioHost) } catch (err) {
         setPlaying(false)
-        setNotice('The voices couldn’t load. Check your connection and try again.')
+        setNotice('The voices couldn’t load: ' + (err.message || 'unknown error') + ' Check your connection and press Retry.')
         return
       }
       if (my !== startToken.current) return // user paused or moved on while it downloaded
@@ -73,6 +75,7 @@ export default function App() {
     const e = engine.current
     e.narrator = p.studioVoice
     e.host = p.studioHost
+    e.hostReady = () => voicesReady(live.current.prefs.studioHost)
     e.rate = p.rate
     e.load({ intro: hostIntro(b, chapter, mins), paragraphs: list, outro: hostOutro(chapter, b.chapters[chIdx + 1]), startPara })
     loadedKey.current = `${b.id}:${chIdx}:${p.mode}`
@@ -228,11 +231,11 @@ export default function App() {
     setPlaying(false)
     previewAudio.current?.pause()
     try {
-      await ensureVoices([voice, voice === prefs.studioVoice ? prefs.studioHost : prefs.studioVoice])
+      await ensureVoices(voice, prefs.studioHost)
       previewAudio.current = new Audio(await synth('It was the best of times, it was the worst of times.', voice))
       previewAudio.current.play()
-    } catch {
-      setNotice('The voices couldn’t load. Check your connection and try again.')
+    } catch (err) {
+      setNotice('The voice couldn’t load: ' + (err.message || 'unknown error') + ' Check your connection and try again.')
     }
   }
 

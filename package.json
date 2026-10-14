@@ -10,6 +10,7 @@
     "test": "node --test tests/"
   },
   "dependencies": {
+    "@diffusionstudio/piper-wasm": "1.0.0",
     "@mintplex-labs/piper-tts-web": "1.0.5",
     "jszip": "3.10.1",
     "onnxruntime-web": "1.18.0",

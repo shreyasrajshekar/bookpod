@@ -58,14 +58,17 @@ function spawn(voice) {
 }
 
 /**
- * Make sure these voices are downloaded and ready; stop engines for voices no longer wanted.
- * progress() receives 0..1 averaged across the voices.
+ * Get the narrator ready (resolves when it is) and fetch the host voice quietly in the background.
+ * Until the host is ready, host lines are read by the narrator, so one slow voice never blocks listening.
+ * progress() receives 0..1 for the narrator download.
  */
-export function loadVoices(ids, progress) {
-  const wanted = [...new Set(ids)]
-  for (const [id, e] of engines) if (!wanted.includes(id)) { e.worker.terminate(); engines.delete(id) }
-  onProgress = () => progress?.(wanted.reduce((s, id) => s + (engines.get(id)?.progress || 0), 0) / wanted.length)
-  return Promise.all(wanted.map((id) => spawn(id).ready)).then(() => undefined)
+export function loadVoices(narrator, host, progress) {
+  const wanted = new Set([narrator, host])
+  for (const [id, e] of engines) if (!wanted.has(id)) { e.worker.terminate(); engines.delete(id) }
+  onProgress = () => progress?.(engines.get(narrator)?.progress || 0)
+  const main = spawn(narrator).ready
+  if (host !== narrator) main.then(() => spawn(host).ready.catch(() => {})).catch(() => {})
+  return main
 }
 
 /** Synthesize one chunk of text with a (loaded) voice → object URL of a WAV clip. */
